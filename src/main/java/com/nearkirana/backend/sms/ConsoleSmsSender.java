@@ -7,14 +7,15 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
- * DEVELOPMENT ONLY: "sends" the OTP by printing it in the console.
+ * DEV / DEMO ONLY: "sends" the OTP by printing it in the console (or Render logs).
  *
- * @Profile("dev") means Spring creates this bean ONLY when the "dev" profile
- * is active. In production (no "dev" profile) this class does not exist, and
+ * @Profile({"dev", "demo"}) means Spring creates this bean ONLY when the "dev"
+ * or "demo" profile is active. In real production neither is active, so this
+ * class does not exist, and
  * the app will not even start until a real SMS provider is configured.
  */
 @Component
-@Profile("dev")
+@Profile({"dev", "demo"})
 public class ConsoleSmsSender implements SmsSender {
 
     private static final Logger log = LoggerFactory.getLogger(ConsoleSmsSender.class);

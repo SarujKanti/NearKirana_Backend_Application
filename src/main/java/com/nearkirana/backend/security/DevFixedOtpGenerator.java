@@ -13,16 +13,17 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * DEVELOPMENT ONLY: demo mobile numbers always get the same OTP.
+ * DEV / DEMO ONLY: demo mobile numbers always get the same OTP.
  * Every other number still gets a secure random OTP.
  *
- * @Profile("dev"): this class does not exist outside the dev profile, so a
+ * @Profile({"dev", "demo"}): exists only in the dev (laptop) and demo (Render
+ *                  testing) profiles. In real production neither is active, so a
  *                  fixed OTP can never work in production.
- * @Primary:        when both generators exist (dev), Spring injects this one.
+ * @Primary:        when both generators exist (dev or demo), Spring injects this one.
  */
 @Component
 @Primary
-@Profile("dev")
+@Profile({"dev", "demo"})
 public class DevFixedOtpGenerator implements OtpGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(DevFixedOtpGenerator.class);

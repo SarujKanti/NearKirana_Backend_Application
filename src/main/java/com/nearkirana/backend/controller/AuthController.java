@@ -1,6 +1,8 @@
 package com.nearkirana.backend.controller;
 
 import com.nearkirana.backend.dto.ApiResponse;
+import com.nearkirana.backend.dto.auth.CancelOtpRequest;
+import com.nearkirana.backend.dto.auth.CancelOtpResponse;
 import com.nearkirana.backend.dto.auth.SendOtpRequest;
 import com.nearkirana.backend.dto.auth.SendOtpResponse;
 import com.nearkirana.backend.dto.auth.VerifyOtpRequest;
@@ -46,5 +48,14 @@ public class AuthController {
             @Valid @RequestBody VerifyOtpRequest request) {
         VerifyOtpResponse data = authService.verifyOtp(request);
         return ResponseEntity.ok(ApiResponse.ok("Mobile number verified successfully", data));
+    }
+
+    // POST http://localhost:8080/api/v1/auth/cancel-otp
+    // Called by the app when the user closes / cancels the OTP screen.
+    @PostMapping("/cancel-otp")
+    public ResponseEntity<ApiResponse<CancelOtpResponse>> cancelOtp(
+            @Valid @RequestBody CancelOtpRequest request) {
+        CancelOtpResponse data = authService.cancelOtp(request);
+        return ResponseEntity.ok(ApiResponse.ok("OTP request cancelled", data));
     }
 }

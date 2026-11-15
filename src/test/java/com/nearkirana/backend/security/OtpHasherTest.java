@@ -48,9 +48,9 @@ class OtpHasherTest {
 
     @Test
     void generatorAlwaysGivesSixDigits() {
-        OtpGenerator generator = new OtpGenerator();
+        OtpGenerator generator = new SecureOtpGenerator();
         for (int i = 0; i < 1000; i++) {
-            assertTrue(generator.generate().matches("\\d{6}"));
+            assertTrue(generator.generate("+919876543210").matches("\\d{6}"));
         }
     }
 }

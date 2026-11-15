@@ -34,6 +34,9 @@ public class OtpChallenge {
     @Column(name = "consumed_at")
     private Instant consumedAt;
 
+    @Column(name = "otp_entered", nullable = false)
+    private boolean otpEntered; // did the user type an OTP for this challenge?
+
     @Column(name = "request_ip", nullable = false, length = 45)
     private String requestIp;
 
@@ -67,6 +70,14 @@ public class OtpChallenge {
 
     public void consume(Instant now) {
         this.consumedAt = now;
+    }
+
+    public void markOtpEntered() {
+        this.otpEntered = true;
+    }
+
+    public boolean isOtpEntered() {
+        return otpEntered;
     }
 
     public UUID getId() {

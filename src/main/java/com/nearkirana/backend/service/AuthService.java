@@ -15,6 +15,7 @@ import com.nearkirana.backend.repository.OtpChallengeRepository;
 import com.nearkirana.backend.repository.UserRepository;
 import com.nearkirana.backend.security.OtpGenerator;
 import com.nearkirana.backend.security.OtpHasher;
+import com.nearkirana.backend.security.TokenService;
 import com.nearkirana.backend.sms.SmsSender;
 import com.nearkirana.backend.util.MobileNumbers;
 import org.slf4j.Logger;
@@ -48,6 +49,7 @@ public class AuthService {
     private final OtpGenerator otpGenerator;
     private final OtpHasher otpHasher;
     private final SmsSender smsSender;
+    private final TokenService tokenService;
     private final OtpProperties otpProperties;
     private final Clock clock;
 
@@ -57,8 +59,10 @@ public class AuthService {
                        OtpGenerator otpGenerator,
                        OtpHasher otpHasher,
                        SmsSender smsSender,
+                       TokenService tokenService,
                        OtpProperties otpProperties,
                        Clock clock) {
+        this.tokenService = tokenService;
         this.otpChallengeRepository = otpChallengeRepository;
         this.userRepository = userRepository;
         this.mobileLoginRecordRepository = mobileLoginRecordRepository;
@@ -211,7 +215,25 @@ public class AuthService {
         log.info("Mobile {} verified (userId={}, newUser={})",
                 MobileNumbers.mask(mobileNumber), user.getId(), isNewUser);
 
-        return new VerifyOtpResponse(UserResponse.from(user), isNewUser, true);
+        // Only NOW, after the OTP was verified, do we issue real tokens.
+        return VerifyOtpResponse.of(tokenService.issueTokens(user), UserResponse.from(user), isNewUser);
+    }
+
+    // ------------------------------------------------------------------
+    // GET /api/v1/auth/me
+    // ------------------------------------------------------------------
+
+    /**
+     * userId comes from the VERIFIED token (its "sub" claim), never from the request body.
+     * We still load the user from the database, so a disabled account is refused at once.
+     */
+    @Transactional(readOnly = true)
+    public UserResponse getCurrentUser(Long userId) {
+        User user = userRepository.findById(userId)
+                .filter(User::isActive)
+                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED,
+                        "Account not found or disabled. Please log in again."));
+        return UserResponse.from(user);
     }
 
     // ------------------------------------------------------------------

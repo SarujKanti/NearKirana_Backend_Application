@@ -1,6 +1,7 @@
 package com.nearkirana.backend.service;
 
 import com.nearkirana.backend.config.OtpProperties;
+import com.nearkirana.backend.dto.auth.AuthTokens;
 import com.nearkirana.backend.dto.auth.CancelOtpRequest;
 import com.nearkirana.backend.dto.auth.CancelOtpResponse;
 import com.nearkirana.backend.dto.auth.SendOtpResponse;
@@ -15,6 +16,7 @@ import com.nearkirana.backend.repository.OtpChallengeRepository;
 import com.nearkirana.backend.repository.UserRepository;
 import com.nearkirana.backend.security.OtpHasher;
 import com.nearkirana.backend.security.SecureOtpGenerator;
+import com.nearkirana.backend.security.TokenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -54,6 +56,7 @@ class AuthServiceTest {
     private OtpChallengeRepository challengeRepo;
     private UserRepository userRepo;
     private MobileLoginRecordRepository recordRepo;
+    private TokenService tokenService;
     private OtpHasher hasher;
     private String lastSmsOtp; // what our fake SMS sender "delivered"
     private AuthService service;
@@ -65,8 +68,11 @@ class AuthServiceTest {
         recordRepo = mock(MobileLoginRecordRepository.class);
         hasher = new OtpHasher(props);
         when(userRepo.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        tokenService = mock(TokenService.class);
+        when(tokenService.issueTokens(any(User.class)))
+                .thenReturn(new AuthTokens("test-access", "test-refresh", "Bearer", 900));
         service = new AuthService(challengeRepo, userRepo, recordRepo, new SecureOtpGenerator(), hasher,
-                (mobile, otp) -> lastSmsOtp = otp, props, Clock.fixed(NOW, ZoneOffset.UTC));
+                (mobile, otp) -> lastSmsOtp = otp, tokenService, props, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     // ---------------- send-otp ----------------
@@ -140,6 +146,9 @@ class AuthServiceTest {
 
         assertTrue(response.isNewUser());
         assertTrue(response.enteredOTP());
+        assertEquals("test-access", response.accessToken());
+        assertEquals("Bearer", response.tokenType());
+        assertEquals(900, response.expiresIn());
         assertTrue(response.user().isVerified());
         assertEquals(Role.CUSTOMER, response.user().role());
         assertTrue(challenge.isConsumed());
@@ -170,6 +179,7 @@ class AuthServiceTest {
         assertEquals("Incorrect OTP. 4 attempt(s) remaining.", ex.getMessage());
         assertEquals(1, challenge.getAttemptCount());
         assertFalse(challenge.isConsumed());
+        verify(tokenService, never()).issueTokens(any());   // NO tokens without a correct OTP
         assertTrue(challenge.isOtpEntered());              // a wrong OTP still counts as "entered"
         verify(recordRepo).recordOtpEntered(MOBILE, NOW);
     }

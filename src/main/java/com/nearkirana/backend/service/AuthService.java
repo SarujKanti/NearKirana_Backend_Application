@@ -81,7 +81,6 @@ public class AuthService {
 
         // First time this number is entered -> new record; otherwise update it.
         mobileLoginRecordRepository.recordOtpRequested(mobileNumber, now);
-        boolean enteredOtpBefore = mobileLoginRecordRepository.findEnteredOtp(mobileNumber).orElse(false);
 
         // Older unused OTPs for this number stop working.
         otpChallengeRepository.invalidateActiveChallenges(mobileNumber, now);
@@ -104,7 +103,8 @@ public class AuthService {
                 challengeId,
                 otpProperties.expiry().toSeconds(),
                 otpProperties.resendCooldown().toSeconds(),
-                enteredOtpBefore);
+                false,  // enteredOTP: nothing typed yet for this new OTP
+                true);  // sendOTP: OTP sent
     }
 
     private void enforceRateLimits(String mobileNumber, String requestIp, Instant now) {
@@ -158,6 +158,7 @@ public class AuthService {
                         "Invalid verification request. Please request a new OTP."));
 
         // The user DID enter an OTP (right or wrong). Saved even if we reject it below.
+        challenge.markOtpEntered();
         mobileLoginRecordRepository.recordOtpEntered(mobileNumber, now);
 
         if (challenge.isConsumed()) {
@@ -233,8 +234,7 @@ public class AuthService {
             log.info("OTP challenge {} cancelled for {}", challenge.getId(), MobileNumbers.mask(mobileNumber));
         }
 
-        boolean enteredOtp = mobileLoginRecordRepository.findEnteredOtp(mobileNumber).orElse(false);
-        return new CancelOtpResponse(enteredOtp);
+        return new CancelOtpResponse(challenge.isOtpEntered());
     }
 
     private String normalizeOrThrow(String rawMobileNumber) {

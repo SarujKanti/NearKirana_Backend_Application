@@ -63,7 +63,6 @@ class AuthServiceTest {
         challengeRepo = mock(OtpChallengeRepository.class);
         userRepo = mock(UserRepository.class);
         recordRepo = mock(MobileLoginRecordRepository.class);
-        when(recordRepo.findEnteredOtp(anyString())).thenReturn(Optional.of(false));
         hasher = new OtpHasher(props);
         when(userRepo.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
         service = new AuthService(challengeRepo, userRepo, recordRepo, new SecureOtpGenerator(), hasher,
@@ -88,15 +87,9 @@ class AuthServiceTest {
         assertEquals(300, response.expiresInSeconds());
         verify(challengeRepo).invalidateActiveChallenges(MOBILE, NOW);
         verify(recordRepo).recordOtpRequested(MOBILE, NOW); // number is recorded
-        assertFalse(response.enteredOTP());                  // never entered an OTP before
-    }
-
-    @Test
-    void sendOtpReportsEnteredOtpFromEarlierAttempts() {
-        when(challengeRepo.findFirstByMobileNumberOrderByCreatedAtDesc(MOBILE)).thenReturn(Optional.empty());
-        when(recordRepo.findEnteredOtp(MOBILE)).thenReturn(Optional.of(true));
-
-        assertTrue(service.sendOtp(MOBILE, IP).enteredOTP());
+        assertFalse(response.enteredOTP());                  // nothing typed yet for this OTP
+        assertTrue(response.sendOTP());                      // OTP was sent
+        assertFalse(challenge.isOtpEntered());
     }
 
     @Test
@@ -177,7 +170,20 @@ class AuthServiceTest {
         assertEquals("Incorrect OTP. 4 attempt(s) remaining.", ex.getMessage());
         assertEquals(1, challenge.getAttemptCount());
         assertFalse(challenge.isConsumed());
-        verify(recordRepo).recordOtpEntered(MOBILE, NOW); // a wrong OTP still counts as "entered"
+        assertTrue(challenge.isOtpEntered());              // a wrong OTP still counts as "entered"
+        verify(recordRepo).recordOtpEntered(MOBILE, NOW);
+    }
+
+    @Test
+    void cancelAfterTypingWrongOtpReportsEntered() {
+        OtpChallenge challenge = challenge("123456", NOW.minusSeconds(30));
+        when(challengeRepo.findByIdForUpdate(challenge.getId())).thenReturn(Optional.of(challenge));
+        assertThrows(ApiException.class, () -> service.verifyOtp(
+                new VerifyOtpRequest(challenge.getId(), MOBILE, "000000", Role.CUSTOMER)));
+
+        CancelOtpResponse response = service.cancelOtp(new CancelOtpRequest(challenge.getId(), MOBILE));
+
+        assertTrue(response.enteredOTP());
     }
 
     // ---------------- cancel-otp ----------------

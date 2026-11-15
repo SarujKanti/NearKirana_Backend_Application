@@ -7,7 +7,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
-import java.util.Optional;
 
 /**
  * Each write is ONE atomic SQL statement. Two requests for the same number at
@@ -39,8 +38,4 @@ public interface MobileLoginRecordRepository extends JpaRepository<MobileLoginRe
     @Query("update MobileLoginRecord r set r.cancelCount = r.cancelCount + 1, r.lastCancelledAt = :now "
             + "where r.mobileNumber = :mobileNumber")
     int recordCancelled(@Param("mobileNumber") String mobileNumber, @Param("now") Instant now);
-
-    /** Has this number ever entered an OTP? Empty if the number was never entered at all. */
-    @Query("select r.enteredOtp from MobileLoginRecord r where r.mobileNumber = :mobileNumber")
-    Optional<Boolean> findEnteredOtp(@Param("mobileNumber") String mobileNumber);
 }

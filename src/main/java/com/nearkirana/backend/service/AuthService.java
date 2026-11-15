@@ -76,7 +76,7 @@ public class AuthService {
         otpChallengeRepository.invalidateActiveChallenges(mobileNumber, now);
 
         UUID challengeId = UUID.randomUUID();
-        String otp = otpGenerator.generate();
+        String otp = otpGenerator.generate(mobileNumber);
         OtpChallenge challenge = new OtpChallenge(
                 challengeId,
                 mobileNumber,

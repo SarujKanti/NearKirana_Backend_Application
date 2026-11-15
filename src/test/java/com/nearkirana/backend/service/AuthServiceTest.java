@@ -10,8 +10,8 @@ import com.nearkirana.backend.entity.User;
 import com.nearkirana.backend.exception.ApiException;
 import com.nearkirana.backend.repository.OtpChallengeRepository;
 import com.nearkirana.backend.repository.UserRepository;
-import com.nearkirana.backend.security.OtpGenerator;
 import com.nearkirana.backend.security.OtpHasher;
+import com.nearkirana.backend.security.SecureOtpGenerator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -60,7 +60,7 @@ class AuthServiceTest {
         userRepo = mock(UserRepository.class);
         hasher = new OtpHasher(props);
         when(userRepo.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
-        service = new AuthService(challengeRepo, userRepo, new OtpGenerator(), hasher,
+        service = new AuthService(challengeRepo, userRepo, new SecureOtpGenerator(), hasher,
                 (mobile, otp) -> lastSmsOtp = otp, props, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

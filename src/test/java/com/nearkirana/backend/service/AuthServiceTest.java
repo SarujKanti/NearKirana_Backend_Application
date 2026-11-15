@@ -1,6 +1,8 @@
 package com.nearkirana.backend.service;
 
 import com.nearkirana.backend.config.OtpProperties;
+import com.nearkirana.backend.dto.auth.CancelOtpRequest;
+import com.nearkirana.backend.dto.auth.CancelOtpResponse;
 import com.nearkirana.backend.dto.auth.SendOtpResponse;
 import com.nearkirana.backend.dto.auth.VerifyOtpRequest;
 import com.nearkirana.backend.dto.auth.VerifyOtpResponse;
@@ -8,6 +10,7 @@ import com.nearkirana.backend.entity.OtpChallenge;
 import com.nearkirana.backend.entity.Role;
 import com.nearkirana.backend.entity.User;
 import com.nearkirana.backend.exception.ApiException;
+import com.nearkirana.backend.repository.MobileLoginRecordRepository;
 import com.nearkirana.backend.repository.OtpChallengeRepository;
 import com.nearkirana.backend.repository.UserRepository;
 import com.nearkirana.backend.security.OtpHasher;
@@ -50,6 +53,7 @@ class AuthServiceTest {
 
     private OtpChallengeRepository challengeRepo;
     private UserRepository userRepo;
+    private MobileLoginRecordRepository recordRepo;
     private OtpHasher hasher;
     private String lastSmsOtp; // what our fake SMS sender "delivered"
     private AuthService service;
@@ -58,9 +62,11 @@ class AuthServiceTest {
     void setUp() {
         challengeRepo = mock(OtpChallengeRepository.class);
         userRepo = mock(UserRepository.class);
+        recordRepo = mock(MobileLoginRecordRepository.class);
+        when(recordRepo.findEnteredOtp(anyString())).thenReturn(Optional.of(false));
         hasher = new OtpHasher(props);
         when(userRepo.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
-        service = new AuthService(challengeRepo, userRepo, new SecureOtpGenerator(), hasher,
+        service = new AuthService(challengeRepo, userRepo, recordRepo, new SecureOtpGenerator(), hasher,
                 (mobile, otp) -> lastSmsOtp = otp, props, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -81,6 +87,25 @@ class AuthServiceTest {
         assertEquals(NOW.plus(Duration.ofMinutes(5)), challenge.getExpiresAt());
         assertEquals(300, response.expiresInSeconds());
         verify(challengeRepo).invalidateActiveChallenges(MOBILE, NOW);
+        verify(recordRepo).recordOtpRequested(MOBILE, NOW); // number is recorded
+        assertFalse(response.enteredOTP());                  // never entered an OTP before
+    }
+
+    @Test
+    void sendOtpReportsEnteredOtpFromEarlierAttempts() {
+        when(challengeRepo.findFirstByMobileNumberOrderByCreatedAtDesc(MOBILE)).thenReturn(Optional.empty());
+        when(recordRepo.findEnteredOtp(MOBILE)).thenReturn(Optional.of(true));
+
+        assertTrue(service.sendOtp(MOBILE, IP).enteredOTP());
+    }
+
+    @Test
+    void rateLimitedRequestIsNotRecorded() {
+        OtpChallenge recent = challenge("x", NOW.minusSeconds(20));
+        when(challengeRepo.findFirstByMobileNumberOrderByCreatedAtDesc(MOBILE)).thenReturn(Optional.of(recent));
+
+        assertThrows(ApiException.class, () -> service.sendOtp(MOBILE, IP));
+        verify(recordRepo, never()).recordOtpRequested(anyString(), any());
     }
 
     @Test
@@ -121,9 +146,23 @@ class AuthServiceTest {
                 new VerifyOtpRequest(challenge.getId(), "9876543210", "123456", Role.CUSTOMER));
 
         assertTrue(response.isNewUser());
+        assertTrue(response.enteredOTP());
         assertTrue(response.user().isVerified());
         assertEquals(Role.CUSTOMER, response.user().role());
         assertTrue(challenge.isConsumed());
+        verify(recordRepo).recordOtpEntered(MOBILE, NOW);
+    }
+
+    @Test
+    void returningUserIsNotNew() {
+        OtpChallenge challenge = challenge("123456", NOW.minusSeconds(30));
+        when(challengeRepo.findByIdForUpdate(challenge.getId())).thenReturn(Optional.of(challenge));
+        when(userRepo.findByMobileNumber(MOBILE)).thenReturn(Optional.of(new User(MOBILE, Role.CUSTOMER)));
+
+        VerifyOtpResponse response = service.verifyOtp(
+                new VerifyOtpRequest(challenge.getId(), MOBILE, "123456", Role.CUSTOMER));
+
+        assertFalse(response.isNewUser());
     }
 
     @Test
@@ -137,6 +176,46 @@ class AuthServiceTest {
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         assertEquals("Incorrect OTP. 4 attempt(s) remaining.", ex.getMessage());
         assertEquals(1, challenge.getAttemptCount());
+        assertFalse(challenge.isConsumed());
+        verify(recordRepo).recordOtpEntered(MOBILE, NOW); // a wrong OTP still counts as "entered"
+    }
+
+    // ---------------- cancel-otp ----------------
+
+    @Test
+    void cancelInvalidatesOtpAndRecordsCancel() {
+        OtpChallenge challenge = challenge("123456", NOW.minusSeconds(30));
+        when(challengeRepo.findByIdForUpdate(challenge.getId())).thenReturn(Optional.of(challenge));
+
+        CancelOtpResponse response = service.cancelOtp(new CancelOtpRequest(challenge.getId(), "9876543210"));
+
+        assertTrue(challenge.isConsumed());
+        assertFalse(response.enteredOTP());
+        verify(recordRepo).recordCancelled(MOBILE, NOW);
+
+        // The cancelled OTP can no longer log in
+        assertThrows(ApiException.class, () -> service.verifyOtp(
+                new VerifyOtpRequest(challenge.getId(), MOBILE, "123456", Role.CUSTOMER)));
+    }
+
+    @Test
+    void cancellingTwiceCountsOnce() {
+        OtpChallenge challenge = challenge("123456", NOW.minusSeconds(30));
+        challenge.consume(NOW.minusSeconds(5));
+        when(challengeRepo.findByIdForUpdate(challenge.getId())).thenReturn(Optional.of(challenge));
+
+        service.cancelOtp(new CancelOtpRequest(challenge.getId(), MOBILE));
+
+        verify(recordRepo, never()).recordCancelled(anyString(), any());
+    }
+
+    @Test
+    void cancelForAnotherNumberIsRejected() {
+        OtpChallenge challenge = challenge("123456", NOW.minusSeconds(30));
+        when(challengeRepo.findByIdForUpdate(challenge.getId())).thenReturn(Optional.of(challenge));
+
+        assertThrows(ApiException.class,
+                () -> service.cancelOtp(new CancelOtpRequest(challenge.getId(), "9123456789")));
         assertFalse(challenge.isConsumed());
     }
 

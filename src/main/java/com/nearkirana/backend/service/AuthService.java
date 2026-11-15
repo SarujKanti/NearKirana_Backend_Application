@@ -1,6 +1,8 @@
 package com.nearkirana.backend.service;
 
 import com.nearkirana.backend.config.OtpProperties;
+import com.nearkirana.backend.dto.auth.CancelOtpRequest;
+import com.nearkirana.backend.dto.auth.CancelOtpResponse;
 import com.nearkirana.backend.dto.auth.SendOtpResponse;
 import com.nearkirana.backend.dto.auth.UserResponse;
 import com.nearkirana.backend.dto.auth.VerifyOtpRequest;
@@ -8,6 +10,7 @@ import com.nearkirana.backend.dto.auth.VerifyOtpResponse;
 import com.nearkirana.backend.entity.OtpChallenge;
 import com.nearkirana.backend.entity.User;
 import com.nearkirana.backend.exception.ApiException;
+import com.nearkirana.backend.repository.MobileLoginRecordRepository;
 import com.nearkirana.backend.repository.OtpChallengeRepository;
 import com.nearkirana.backend.repository.UserRepository;
 import com.nearkirana.backend.security.OtpGenerator;
@@ -29,8 +32,9 @@ import java.util.UUID;
 /**
  * Mobile number + OTP login.
  *
- *  send-otp:   validate number -> rate limits -> generate OTP -> store HASH -> send SMS
- *  verify-otp: load challenge (locked) -> checks -> compare hash -> find or create user
+ *  send-otp:   validate number -> rate limits -> record number -> generate OTP -> store HASH -> send SMS
+ *  verify-otp: load challenge (locked) -> record "OTP entered" -> checks -> compare hash -> find or create user
+ *  cancel-otp: load challenge (locked) -> invalidate it -> record the cancel
  */
 @Service
 public class AuthService {
@@ -40,6 +44,7 @@ public class AuthService {
 
     private final OtpChallengeRepository otpChallengeRepository;
     private final UserRepository userRepository;
+    private final MobileLoginRecordRepository mobileLoginRecordRepository;
     private final OtpGenerator otpGenerator;
     private final OtpHasher otpHasher;
     private final SmsSender smsSender;
@@ -48,6 +53,7 @@ public class AuthService {
 
     public AuthService(OtpChallengeRepository otpChallengeRepository,
                        UserRepository userRepository,
+                       MobileLoginRecordRepository mobileLoginRecordRepository,
                        OtpGenerator otpGenerator,
                        OtpHasher otpHasher,
                        SmsSender smsSender,
@@ -55,6 +61,7 @@ public class AuthService {
                        Clock clock) {
         this.otpChallengeRepository = otpChallengeRepository;
         this.userRepository = userRepository;
+        this.mobileLoginRecordRepository = mobileLoginRecordRepository;
         this.otpGenerator = otpGenerator;
         this.otpHasher = otpHasher;
         this.smsSender = smsSender;
@@ -71,6 +78,10 @@ public class AuthService {
         Instant now = clock.instant();
 
         enforceRateLimits(mobileNumber, requestIp, now);
+
+        // First time this number is entered -> new record; otherwise update it.
+        mobileLoginRecordRepository.recordOtpRequested(mobileNumber, now);
+        boolean enteredOtpBefore = mobileLoginRecordRepository.findEnteredOtp(mobileNumber).orElse(false);
 
         // Older unused OTPs for this number stop working.
         otpChallengeRepository.invalidateActiveChallenges(mobileNumber, now);
@@ -92,7 +103,8 @@ public class AuthService {
         return new SendOtpResponse(
                 challengeId,
                 otpProperties.expiry().toSeconds(),
-                otpProperties.resendCooldown().toSeconds());
+                otpProperties.resendCooldown().toSeconds(),
+                enteredOtpBefore);
     }
 
     private void enforceRateLimits(String mobileNumber, String requestIp, Instant now) {
@@ -145,9 +157,12 @@ public class AuthService {
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST,
                         "Invalid verification request. Please request a new OTP."));
 
+        // The user DID enter an OTP (right or wrong). Saved even if we reject it below.
+        mobileLoginRecordRepository.recordOtpEntered(mobileNumber, now);
+
         if (challenge.isConsumed()) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "This OTP has already been used or replaced. Please request a new OTP.");
+                    "This OTP has already been used, replaced or cancelled. Please request a new OTP.");
         }
         if (challenge.isExpired(now)) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
@@ -195,7 +210,31 @@ public class AuthService {
         log.info("Mobile {} verified (userId={}, newUser={})",
                 MobileNumbers.mask(mobileNumber), user.getId(), isNewUser);
 
-        return new VerifyOtpResponse(UserResponse.from(user), isNewUser);
+        return new VerifyOtpResponse(UserResponse.from(user), isNewUser, true);
+    }
+
+    // ------------------------------------------------------------------
+    // POST /api/v1/auth/cancel-otp
+    // ------------------------------------------------------------------
+    @Transactional
+    public CancelOtpResponse cancelOtp(CancelOtpRequest request) {
+        String mobileNumber = normalizeOrThrow(request.mobileNumber());
+        Instant now = clock.instant();
+
+        OtpChallenge challenge = otpChallengeRepository.findByIdForUpdate(request.challengeId())
+                .filter(c -> c.getMobileNumber().equals(mobileNumber))
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST,
+                        "Invalid cancel request."));
+
+        // Cancelling twice, or after a successful login, changes nothing.
+        if (!challenge.isConsumed()) {
+            challenge.consume(now); // this OTP can no longer be used
+            mobileLoginRecordRepository.recordCancelled(mobileNumber, now);
+            log.info("OTP challenge {} cancelled for {}", challenge.getId(), MobileNumbers.mask(mobileNumber));
+        }
+
+        boolean enteredOtp = mobileLoginRecordRepository.findEnteredOtp(mobileNumber).orElse(false);
+        return new CancelOtpResponse(enteredOtp);
     }
 
     private String normalizeOrThrow(String rawMobileNumber) {

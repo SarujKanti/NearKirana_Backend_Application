@@ -4,6 +4,7 @@ import com.nearkirana.backend.dto.ApiResponse;
 import com.nearkirana.backend.dto.shop.ShopRequest;
 import com.nearkirana.backend.dto.shop.ShopResponse;
 import com.nearkirana.backend.dto.shop.ShopStatusRequest;
+import com.nearkirana.backend.dto.shop.ShopUpdateRequest;
 import com.nearkirana.backend.service.ShopService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -68,6 +69,16 @@ public class ShopkeeperShopController {
             @PathVariable Long shopId,
             @Valid @RequestBody ShopRequest request) {
         ShopResponse shop = shopService.updateShop(userId(jwt), shopId, request);
+        return ResponseEntity.ok(ApiResponse.ok("Shop updated successfully", shop));
+    }
+
+    // PATCH /api/v1/shopkeeper/shops/{shopId}        -> change ONLY the fields that are sent
+    @PatchMapping("/{shopId}")
+    public ResponseEntity<ApiResponse<ShopResponse>> patchShop(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long shopId,
+            @Valid @RequestBody ShopUpdateRequest request) {
+        ShopResponse shop = shopService.patchShop(userId(jwt), shopId, request);
         return ResponseEntity.ok(ApiResponse.ok("Shop updated successfully", shop));
     }
 

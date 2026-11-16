@@ -124,6 +124,12 @@ public class Shop {
         this.open = open;
     }
 
+    /** radius must already be checked by the service (null when delivery is off). */
+    public void setDelivery(boolean deliveryAvailable, BigDecimal deliveryRadiusKm) {
+        this.deliveryAvailable = deliveryAvailable;
+        this.deliveryRadiusKm = deliveryRadiusKm;
+    }
+
     public Long getId() {
         return id;
     }

@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -174,6 +175,29 @@ class ShopServiceTest {
         ApiException ex = assertThrows(ApiException.class,
                 () -> service.patchShop(OWNER_ID, 1L, patch(null, null, null, null, null)));
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+    }
+
+    @Test
+    void deliveryOnNeedsRadiusAndOffClearsIt() {
+        existingShop(false, null);
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.updateDelivery(OWNER_ID, 1L, true, null));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+
+        ShopResponse on = service.updateDelivery(OWNER_ID, 1L, true, new BigDecimal("4"));
+        assertTrue(on.deliveryAvailable());
+        assertEquals(new BigDecimal("4"), on.deliveryRadiusKm());
+
+        ShopResponse off = service.updateDelivery(OWNER_ID, 1L, false, null);
+        assertFalse(off.deliveryAvailable());
+        assertNull(off.deliveryRadiusKm());
+    }
+
+    @Test
+    void deliveryOnKeepsCurrentRadiusWhenNotSent() {
+        existingShop(true, new BigDecimal("3"));
+        ShopResponse on = service.updateDelivery(OWNER_ID, 1L, true, null);
+        assertEquals(new BigDecimal("3"), on.deliveryRadiusKm());
     }
 
     private Shop existingShop(boolean delivery, BigDecimal radius) {

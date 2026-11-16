@@ -1,6 +1,7 @@
 package com.nearkirana.backend.controller;
 
 import com.nearkirana.backend.dto.ApiResponse;
+import com.nearkirana.backend.dto.shop.ShopDeliveryRequest;
 import com.nearkirana.backend.dto.shop.ShopRequest;
 import com.nearkirana.backend.dto.shop.ShopResponse;
 import com.nearkirana.backend.dto.shop.ShopStatusRequest;
@@ -90,6 +91,18 @@ public class ShopkeeperShopController {
             @Valid @RequestBody ShopStatusRequest request) {
         ShopResponse shop = shopService.updateOpenStatus(userId(jwt), shopId, request.isOpen());
         String message = request.isOpen() ? "Shop is now open" : "Shop is now closed";
+        return ResponseEntity.ok(ApiResponse.ok(message, shop));
+    }
+
+    // PATCH /api/v1/shopkeeper/shops/{shopId}/delivery -> turn home delivery on / off
+    @PatchMapping("/{shopId}/delivery")
+    public ResponseEntity<ApiResponse<ShopResponse>> updateDelivery(
+            @AuthenticationPrincipal Jwt jwt,
+            @PathVariable Long shopId,
+            @Valid @RequestBody ShopDeliveryRequest request) {
+        ShopResponse shop = shopService.updateDelivery(
+                userId(jwt), shopId, request.deliveryAvailable(), request.deliveryRadiusKm());
+        String message = request.deliveryAvailable() ? "Delivery is now available" : "Delivery is now turned off";
         return ResponseEntity.ok(ApiResponse.ok(message, shop));
     }
 

@@ -137,6 +137,20 @@ public class ShopService {
         return ShopResponse.from(shopRepository.saveAndFlush(shop));
     }
 
+    // PATCH /api/v1/shopkeeper/shops/{shopId}/delivery
+    @Transactional
+    public ShopResponse updateDelivery(Long ownerId, Long shopId, boolean deliveryAvailable, BigDecimal radiusKm) {
+        requireActiveShopkeeper(ownerId);
+        Shop shop = findOwnShop(ownerId, shopId);
+        // Radius not sent? Keep the current one (only possible if delivery was already on).
+        BigDecimal radius = deliveryRadius(deliveryAvailable,
+                radiusKm != null ? radiusKm : shop.getDeliveryRadiusKm());
+        shop.setDelivery(deliveryAvailable, radius);
+        log.info("Shop {} delivery is now {} (user {})", shopId,
+                deliveryAvailable ? "ON, " + radius + " km" : "OFF", ownerId);
+        return ShopResponse.from(shopRepository.saveAndFlush(shop));
+    }
+
     // ------------------------------------------------------------------
 
     /**

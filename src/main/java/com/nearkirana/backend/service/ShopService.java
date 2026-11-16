@@ -2,6 +2,7 @@ package com.nearkirana.backend.service;
 
 import com.nearkirana.backend.dto.shop.ShopRequest;
 import com.nearkirana.backend.dto.shop.ShopResponse;
+import com.nearkirana.backend.dto.shop.ShopUpdateRequest;
 import com.nearkirana.backend.entity.Role;
 import com.nearkirana.backend.entity.Shop;
 import com.nearkirana.backend.exception.ApiException;
@@ -86,6 +87,46 @@ public class ShopService {
         return ShopResponse.from(shopRepository.saveAndFlush(shop));
     }
 
+    // PATCH /api/v1/shopkeeper/shops/{shopId}   (only the fields that were sent)
+    @Transactional
+    public ShopResponse patchShop(Long ownerId, Long shopId, ShopUpdateRequest request) {
+        if (request.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Send at least one field to update.");
+        }
+        requireActiveShopkeeper(ownerId);
+        Shop shop = findOwnShop(ownerId, shopId);
+
+        // Rule for every field: the new value if it was sent, otherwise the current one.
+        String contactNumber = request.contactNumber() == null
+                ? shop.getContactNumber()
+                : normalizeContact(request.contactNumber());
+        boolean delivery = request.deliveryAvailable() != null
+                ? request.deliveryAvailable()
+                : shop.isDeliveryAvailable();
+        BigDecimal radius = deliveryRadius(delivery,
+                request.deliveryRadiusKm() != null ? request.deliveryRadiusKm() : shop.getDeliveryRadiusKm());
+
+        shop.updateDetails(
+                request.name() != null ? request.name().trim() : shop.getName(),
+                request.description() != null ? blankToNull(request.description()) : shop.getDescription(),
+                contactNumber,
+                request.addressLine() != null ? request.addressLine().trim() : shop.getAddressLine(),
+                request.villageOrCity() != null ? request.villageOrCity().trim() : shop.getVillageOrCity(),
+                request.district() != null ? blankToNull(request.district()) : shop.getDistrict(),
+                request.state() != null ? request.state().trim() : shop.getState(),
+                request.pincode() != null ? request.pincode() : shop.getPincode(),
+                request.latitude() != null ? request.latitude() : shop.getLatitude(),
+                request.longitude() != null ? request.longitude() : shop.getLongitude(),
+                delivery,
+                radius);
+        if (request.isOpen() != null) {
+            shop.setOpen(request.isOpen());
+        }
+
+        log.info("Shop {} partially updated by user {}", shopId, ownerId);
+        return ShopResponse.from(shopRepository.saveAndFlush(shop));
+    }
+
     // PATCH /api/v1/shopkeeper/shops/{shopId}/status
     @Transactional
     public ShopResponse updateOpenStatus(Long ownerId, Long shopId, boolean open) {
@@ -119,19 +160,9 @@ public class ShopService {
 
     /** Cleans and checks the request, then copies it into the entity. */
     private void applyDetails(Shop shop, ShopRequest request) {
-        String contactNumber = MobileNumbers.normalize(request.contactNumber())
-                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST,
-                        "Please enter a valid 10-digit Indian contact number."));
-
+        String contactNumber = normalizeContact(request.contactNumber());
         boolean delivery = Boolean.TRUE.equals(request.deliveryAvailable());
-        BigDecimal radius = request.deliveryRadiusKm();
-        if (delivery && radius == null) {
-            throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "Delivery radius (km) is required when delivery is available.");
-        }
-        if (!delivery) {
-            radius = null; // no delivery -> no radius
-        }
+        BigDecimal radius = deliveryRadius(delivery, request.deliveryRadiusKm());
 
         shop.updateDetails(
                 request.name().trim(),
@@ -146,6 +177,24 @@ public class ShopService {
                 request.longitude(),
                 delivery,
                 radius);
+    }
+
+    private static String normalizeContact(String raw) {
+        return MobileNumbers.normalize(raw)
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST,
+                        "Please enter a valid 10-digit Indian contact number."));
+    }
+
+    /** Delivery on -> a radius is required. Delivery off -> no radius is stored. */
+    private static BigDecimal deliveryRadius(boolean delivery, BigDecimal radius) {
+        if (!delivery) {
+            return null;
+        }
+        if (radius == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "Delivery radius (km) is required when delivery is available.");
+        }
+        return radius;
     }
 
     private static String blankToNull(String value) {

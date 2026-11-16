@@ -2,6 +2,7 @@ package com.nearkirana.backend.service;
 
 import com.nearkirana.backend.dto.shop.ShopRequest;
 import com.nearkirana.backend.dto.shop.ShopResponse;
+import com.nearkirana.backend.dto.shop.ShopUpdateRequest;
 import com.nearkirana.backend.entity.Role;
 import com.nearkirana.backend.entity.Shop;
 import com.nearkirana.backend.entity.User;
@@ -131,6 +132,62 @@ class ShopServiceTest {
 
         ShopResponse closed = service.updateOpenStatus(OWNER_ID, 1L, false);
         assertFalse(closed.isOpen());
+    }
+
+    @Test
+    void patchChangesOnlySentFields() {
+        Shop existing = existingShop(true, new BigDecimal("3"));
+
+        ShopResponse patched = service.patchShop(OWNER_ID, 1L,
+                patch("Ramu Kirana Store 2", null, null, null, null));
+
+        assertEquals("Ramu Kirana Store 2", patched.name());   // changed
+        assertEquals("Daily groceries", patched.description()); // unchanged
+        assertEquals("+919876543210", patched.contactNumber());
+        assertEquals("501218", patched.pincode());
+        assertEquals(17.2403, patched.latitude());
+        assertEquals(new BigDecimal("3"), patched.deliveryRadiusKm());
+        assertEquals(existing.isOpen(), patched.isOpen());
+    }
+
+    @Test
+    void patchCanCloseShopAndClearDescription() {
+        existingShop(false, null);
+        ShopResponse patched = service.patchShop(OWNER_ID, 1L, patch(null, "", false, null, null));
+        assertNull(patched.description());
+        assertFalse(patched.isOpen());
+    }
+
+    @Test
+    void patchTurningOnDeliveryNeedsRadius() {
+        existingShop(false, null);
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.patchShop(OWNER_ID, 1L, patch(null, null, null, true, null)));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+
+        ShopResponse ok = service.patchShop(OWNER_ID, 1L, patch(null, null, null, true, new BigDecimal("2.5")));
+        assertEquals(new BigDecimal("2.5"), ok.deliveryRadiusKm());
+    }
+
+    @Test
+    void emptyPatchIsRejected() {
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.patchShop(OWNER_ID, 1L, patch(null, null, null, null, null)));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+    }
+
+    private Shop existingShop(boolean delivery, BigDecimal radius) {
+        Shop shop = new Shop(OWNER_ID);
+        shop.updateDetails("Ramu Kirana Store", "Daily groceries", "+919876543210", "Near bus stand",
+                "Shamshabad", "Rangareddy", "Telangana", "501218", 17.2403, 78.4294, delivery, radius);
+        when(shopRepository.findByIdAndOwnerId(1L, OWNER_ID)).thenReturn(Optional.of(shop));
+        return shop;
+    }
+
+    private static ShopUpdateRequest patch(String name, String description, Boolean isOpen,
+                                           Boolean delivery, BigDecimal radius) {
+        return new ShopUpdateRequest(name, description, null, null, null, null, null, null,
+                null, null, isOpen, delivery, radius);
     }
 
     private static ShopRequest request(String name, String contact, boolean delivery, BigDecimal radius) {
